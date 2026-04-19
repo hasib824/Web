@@ -12,7 +12,7 @@
 1. [TL;DR & Calendar-at-a-Glance](#tldr--calendar-at-a-glance)
 2. [How to Read This Document](#how-to-read-this-document)
 3. [Leverage Audit](#leverage-audit)
-4. [Phase 0 — Java 21 Refresh for Kotlin Devs](#phase-0--java-21-refresh-for-kotlin-devs)
+4. [Phase 0 — Java 21 Catch-Up for Java Veterans](#phase-0--java-21-catch-up-for-java-veterans)
 5. [Phase 1 — Spring Boot Core](#phase-1--spring-boot-core)
 6. [Phase 2 — Oracle DB + JPA/Hibernate](#phase-2--oracle-db--jpahibernate)
 7. [Phase 3 — TypeScript + React](#phase-3--typescript--react)
