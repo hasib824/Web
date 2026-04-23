@@ -429,6 +429,18 @@ SELECT * FROM books WHERE author_id = 1;
 
 ---
 
+### Author এর JSON Output
+
+```json
+{
+  "id": 1,
+  "name": "Bibhutibhushan Bandyopadhyay",
+  "books": [
+    { "id": 5, "title": "Pother Pachali" },
+    { "id": 8, "title": "Aparajito" }
+  ]
+}
+
 <a name="পর্ব-৫"></a>
 
 ## পর্ব ৫ — `mappedBy` — পুরোপুরি Decode
