@@ -439,7 +439,8 @@ SELECT * FROM books WHERE author_id = 1;
     { "id": 5, "title": "Pother Pachali" },
     { "id": 8, "title": "Aparajito" }
   ]
-}```
+}
+```
 
 <a name="পর্ব-৫"></a>
 
