@@ -426,6 +426,470 @@ public class GlobalExceptionHandler { }
 
 **Rule of thumb:** REST API হলে সবসময় `@RestControllerAdvice` use করো।
 
+
+# `@ControllerAdvice` — Trigger ও Usage বিস্তারিত
+
+---
+
+## Trigger কীভাবে হয় — Step by Step
+
+### Controller এ Exception throw হয়
+
+```java
+@RestController
+@RequestMapping("/api/books")
+public class BookController {
+
+    @Autowired
+    private BookRepository bookRepository;
+
+    @GetMapping("/{id}")
+    public Book getBook(@PathVariable Long id) {
+        // ⭐ এখানে Exception throw হবে যদি Book না পাওয়া যায়
+        return bookRepository.findById(id).get();
+    }
+}
+```
+
+### API Call করি
+
+```
+GET /api/books/999
+```
+
+### পর্দার পেছনে কী হয়
+
+**Step 1:** Controller এর method চলছে
+
+```java
+bookRepository.findById(999).get()
+```
+
+**Step 2:** Book নেই — Exception throw হয়
+
+```
+java.util.NoSuchElementException: No value present
+```
+
+**Step 3:** Exception Spring এর exception handling system এ যায়
+
+```
+Exception ঘটলো
+        ↓
+Spring খোঁজে: "এই exception কে কেউ handle করবে?"
+        ↓
+@RestControllerAdvice class খোঁজে
+        ↓
+GlobalExceptionHandler class পেল ✅
+        ↓
+@ExceptionHandler(NoSuchElementException.class) method পেল ✅
+        ↓
+সেই method call হয় → response return হয়
+```
+
+**Step 4:** Client এ response
+
+```json
+{
+  "status": 404,
+  "message": "No value present"
+}
+```
+
+---
+
+## Practically দেখি — Full Code
+
+### ১. Exception Thrown (Controller)
+
+```java
+@RestController
+@RequestMapping("/api/books")
+public class BookController {
+
+    @Autowired
+    private BookRepository bookRepository;
+
+    @GetMapping("/{id}")
+    public Book getBook(@PathVariable Long id) {
+        System.out.println("Method called: getBook(" + id + ")");
+
+        // ⭐ Exception throw হবে এখানে
+        Book book = bookRepository.findById(id).get();
+
+        System.out.println("This line won't execute if exception");
+        return book;
+    }
+}
+```
+
+### ২. Global Handler (Sits quietly, waiting)
+
+```java
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(NoSuchElementException.class)
+    public ResponseEntity<Map<String, Object>> handleNotFound(NoSuchElementException e) {
+        System.out.println("⭐ Handler triggered for NoSuchElementException!");
+
+        Map<String, Object> error = new HashMap<>();
+        error.put("status", 404);
+        error.put("message", e.getMessage());
+
+        return ResponseEntity.status(404).body(error);
+    }
+}
+```
+
+### ৩. API Call করি
+
+```
+GET http://localhost:8080/api/books/999
+```
+
+### ৪. Console Output
+
+```
+Method called: getBook(999)
+⭐ Handler triggered for NoSuchElementException!
+```
+
+### ৫. Response Browser এ
+
+```json
+{
+  "status": 404,
+  "message": "No value present"
+}
+```
+
+---
+
+## আরেকটা উদাহরণ — Validation Exception
+
+### Controller
+
+```java
+@PostMapping
+public Book createBook(@Valid @RequestBody BookCreateDTO dto) {
+    System.out.println("Method called: createBook");
+
+    // যদি dto invalid হয়, Spring automatic @ExceptionHandler call করবে
+    return bookService.createBook(dto);
+}
+```
+
+### DTO (with validation)
+
+```java
+public class BookCreateDTO {
+
+    @NotBlank(message = "Title is required")
+    private String title;
+
+    @Positive(message = "Price must be positive")
+    private Double price;
+}
+```
+
+### Handler
+
+```java
+@ExceptionHandler(MethodArgumentNotValidException.class)
+public ResponseEntity<Map<String, Object>> handleValidation(
+        MethodArgumentNotValidException e) {
+
+    System.out.println("⭐ Handler triggered for validation error!");
+
+    Map<String, String> errors = new HashMap<>();
+    e.getBindingResult().getFieldErrors().forEach(err ->
+        errors.put(err.getField(), err.getDefaultMessage())
+    );
+
+    return ResponseEntity.badRequest().body(Map.of(
+        "status", 400,
+        "message", "Validation failed",
+        "errors", errors
+    ));
+}
+```
+
+### API Call (Invalid Data)
+
+```json
+POST /api/books
+{
+  "title": "",
+  "price": -100
+}
+```
+
+### Console
+
+```
+⭐ Handler triggered for validation error!
+```
+
+### Response
+
+```json
+{
+  "status": 400,
+  "message": "Validation failed",
+  "errors": {
+    "title": "Title is required",
+    "price": "Price must be positive"
+  }
+}
+```
+
+---
+
+## কেন এটা Automatically Trigger হয়?
+
+### Spring এর Magic — Proxy Pattern
+
+Spring প্রতিটা Controller কে একটা **proxy** এ wrap করে দেয়।
+
+```
+Real Controller  ←  wrapped by  →  Proxy (exception handling যুক্ত)
+```
+
+যখন Controller method চলে, আসলে proxy চলে।
+
+```java
+// Proxy internally এরকম কাজ করে
+try {
+    realController.getBook(id);         // আসল method
+} catch (NoSuchElementException e) {
+    // GlobalExceptionHandler খোঁজে
+    GlobalExceptionHandler handler = findHandler(e);
+    return handler.handleNotFound(e);   // handler call
+}
+```
+
+তুমি এই code লিখো না — Spring নিজেই করে দেয়।
+
+---
+
+## Multiple Exception একসাথে — Trigger Flow
+
+```java
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(NoSuchElementException.class)      // ①
+    public ResponseEntity<?> handle1(NoSuchElementException e) {
+        return ResponseEntity.status(404).body(...);
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)    // ②
+    public ResponseEntity<?> handle2(IllegalArgumentException e) {
+        return ResponseEntity.status(400).body(...);
+    }
+
+    @ExceptionHandler(NullPointerException.class)        // ③
+    public ResponseEntity<?> handle3(NullPointerException e) {
+        return ResponseEntity.status(500).body(...);
+    }
+}
+```
+
+### কোনটা Trigger হবে?
+
+Exception Type এর উপর ভিত্তি করে —
+
+```
+throw new NoSuchElementException()     → ① trigger
+throw new IllegalArgumentException()   → ② trigger
+throw new NullPointerException()       → ③ trigger
+```
+
+Spring exact match খোঁজে।
+
+---
+
+## Hierarchy তে Trigger কীভাবে হয়?
+
+```java
+// Exception Hierarchy
+public class ResourceNotFoundException extends RuntimeException { }
+public class BookNotFoundException extends ResourceNotFoundException { }
+```
+
+### Handler
+
+```java
+@ExceptionHandler(ResourceNotFoundException.class)   // Parent handle করছে
+public ResponseEntity<?> handle(ResourceNotFoundException e) {
+    return ResponseEntity.status(404).body(...);
+}
+```
+
+### কোনটা throw হলেও Trigger হবে
+
+```java
+throw new BookNotFoundException(id);          // ✅ Trigger (child)
+throw new ResourceNotFoundException("msg");   // ✅ Trigger (parent)
+```
+
+**কেন?** Java এ parent class এর handler child exception ও handle করে — এটা polymorphism।
+
+---
+
+## Exception Throw না হলে?
+
+```java
+@GetMapping("/{id}")
+public Book getBook(@PathVariable Long id) {
+    return bookRepository.findById(id).orElseThrow();
+}
+```
+
+```
+Book exist করলে   → Exception হয় না → Handler trigger হয় না → 200 response
+Book না থাকলে    → Exception হয়     → Handler trigger হয়     → 404 response
+```
+
+---
+
+## Practical Test — সব Exception একসাথে দেখি
+
+```java
+@RestController
+public class TestController {
+
+    // ① Not Found
+    @GetMapping("/test1")
+    public String test1() {
+        throw new NoSuchElementException("Not found");
+    }
+
+    // ② Bad Request
+    @GetMapping("/test2")
+    public String test2() {
+        throw new IllegalArgumentException("Invalid argument");
+    }
+
+    // ③ Null Pointer
+    @GetMapping("/test3")
+    public String test3() {
+        String str = null;
+        return str.length() + "";   // NullPointerException
+    }
+
+    // ④ Checked Exception
+    @GetMapping("/test4")
+    public String test4() throws Exception {
+        throw new IOException("File not found");
+    }
+}
+```
+
+```java
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(NoSuchElementException.class)
+    public ResponseEntity<?> handle1(NoSuchElementException e) {
+        System.out.println("① NoSuchElementException handler triggered");
+        return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<?> handle2(IllegalArgumentException e) {
+        System.out.println("② IllegalArgumentException handler triggered");
+        return ResponseEntity.status(400).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(NullPointerException.class)
+    public ResponseEntity<?> handle3(NullPointerException e) {
+        System.out.println("③ NullPointerException handler triggered");
+        return ResponseEntity.status(500).body(Map.of("error", "Null value encountered"));
+    }
+
+    @ExceptionHandler(Exception.class)   // Catch-all
+    public ResponseEntity<?> handleAll(Exception e) {
+        System.out.println("④ Catch-all handler triggered for: " + e.getClass().getName());
+        return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+    }
+}
+```
+
+### API Calls এর Result
+
+```
+GET /test1  →  ① triggered  →  404
+GET /test2  →  ② triggered  →  400
+GET /test3  →  ③ triggered  →  500
+GET /test4  →  ④ triggered  →  500
+```
+
+---
+
+## টাইমলাইন — Step by Step Flow
+
+```
+Time    Event
+─────────────────────────────────────────────────────────────────
+T1      Client: GET /api/books/999
+T2      → BookController.getBook(999) method entry
+T3      → bookRepository.findById(999).get()
+T4      → Book not found, Exception thrown ❌
+T5      → Exception caught by Spring
+T6      → Spring looks for @RestControllerAdvice
+T7      → GlobalExceptionHandler found ✅
+T8      → @ExceptionHandler(NoSuchElementException.class) found ✅
+T9      → handleNotFound() method invoked
+T10     → Map created with status 404
+T11     → ResponseEntity.status(404).body(error)
+T12     → Client gets JSON response
+
+        {
+          "status": 404,
+          "message": "No value present"
+        }
+```
+
+---
+
+## একটা সাধারণ ভুল
+
+```java
+@GetMapping("/{id}")
+public Book getBook(@PathVariable Long id) {
+    try {
+        return bookRepository.findById(id).get();
+    } catch (NoSuchElementException e) {
+        throw e;   // ❌ এটা দরকার নেই! Handler কে কাজ করতে দাও
+    }
+}
+```
+
+### Clean Version
+
+```java
+@GetMapping("/{id}")
+public Book getBook(@PathVariable Long id) {
+    return bookRepository.findById(id).get();
+    // ✅ Exception throw হবে, Spring automatically handler call করবে
+}
+```
+
+---
+
+## সারসংক্ষেপ
+
+```
+@ExceptionHandler কে তুমি manually call করো না।
+Spring automatic ভাবে call করে যখন ওই exception throw হয়।
+
+Exception throw → Spring catches → Handler auto-invoked → Response sent
+
+এটাই Spring Magic! ✨
+```
+
 ---
 
 <a name="পর্ব-৫"></a>
