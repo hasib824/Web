@@ -596,22 +596,33 @@ public class BookCreateDTO {
 ### Handler
 
 ```java
-@ExceptionHandler(MethodArgumentNotValidException.class)
-public ResponseEntity<Map<String, Object>> handleValidation(
-        MethodArgumentNotValidException e) {
+@RestControllerAdvice                            // ⭐ Global handler
+public class GlobalExceptionHandler {
 
-    System.out.println("⭐ Handler triggered for validation error!");
+    // Validation error
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<?> handleValidation(MethodArgumentNotValidException e) {
 
-    Map<String, String> errors = new HashMap<>();
-    e.getBindingResult().getFieldErrors().forEach(err ->
-        errors.put(err.getField(), err.getDefaultMessage())
-    );
+        Map<String, String> errors = new HashMap<>();
+        e.getBindingResult().getFieldErrors().forEach(err ->
+            errors.put(err.getField(), err.getDefaultMessage())
+        );
 
-    return ResponseEntity.badRequest().body(Map.of(
-        "status", 400,
-        "message", "Validation failed",
-        "errors", errors
-    ));
+        return ResponseEntity.badRequest().body(Map.of(
+            "status", 400,
+            "message", "Validation failed",
+            "errors", errors
+        ));
+    }
+
+    // Not Found error
+    @ExceptionHandler(NoSuchElementException.class)
+    public ResponseEntity<?> handleNotFound(NoSuchElementException e) {
+        return ResponseEntity.status(404).body(Map.of(
+            "status", 404,
+            "message", e.getMessage()
+        ));
+    }
 }
 ```
 
